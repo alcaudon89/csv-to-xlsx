@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSV a Excel Mejorado (Debug)</title>
+    <!-- SheetJS para conversión CSV→XLSX -->
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 2rem auto; padding: 1rem; }
+        label, input, button { display: block; width: 100%; margin-bottom: 1rem; }
+        button { padding: 0.5rem; font-size: 1rem; }
+        #debug { background: #f9f9f9; border: 1px solid #ddd; padding: 0.5rem; height: 150px; overflow-y: auto; font-family: monospace; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <h1>Convertir CSV a Excel (Debug)</h1>
+    <form id="csvForm">
+        <label for="csvFile">Selecciona archivo CSV:</label>
+        <input type="file" id="csvFile" accept=".csv" required>
+
+        <label for="delimiter">Carácter separador:</label>
+        <input type="text" id="delimiter" value="," maxlength="1" required>
+
+        <button type="submit">Convertir a Excel</button>
+    </form>
+    <div>
+        <h2>Debug Console</h2>
+        <div id="debug"></div>
+    </div>
+    <script>
+    const debugDiv = document.getElementById('debug');
+    function debug(msg) {
+        console.log(msg);
+        const p = document.createElement('div');
+        p.textContent = msg;
+        debugDiv.appendChild(p);
+        debugDiv.scrollTop = debugDiv.scrollHeight;
+    }
+
+    /**
+     * Parsea una línea de CSV respetando comillas dobles.
+     * Permite cadenas entrecomilladas que contienen delimitadores.
+     */
+    function parseCSVLine(line, delimiter) {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            const nextChar = i < line.length - 1 ? line[i + 1] : null;
+            if (char === '"') {
+                if (inQuotes && nextChar === '"') {
+                    // Comillas escapadas dentro de campo
+                    current += '"';
+                    i++; // saltar siguiente comilla
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === delimiter && !inQuotes) {
+                result.push(current);
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        result.push(current);
+        return result;
+    }
+
+    document.getElementById('csvForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        debug('Formulario enviado');
+        const fileInput = document.getElementById('csvFile');
+        const delimiter = document.getElementById('delimiter').value || ',';
+        debug('Delimiter: ' + delimiter);
+        if (!fileInput.files.length) {
+            alert('Por favor selecciona un archivo CSV.');
+            debug('No hay archivo seleccionado');
+            return;
+        }
+        const file = fileInput.files[0];
+        debug('Archivo seleccionado: ' + file.name);
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            debug('Reader.onload disparado');
+            const csvData = evt.target.result;
+            debug('CSV cargado, longitud: ' + csvData.length + ' caracteres');
+            try {
+                const lines = csvData.split(/\r?\n/);
+                debug('Número de líneas: ' + lines.length);
+                const rows = lines.map((line, i) => {
+                    debug('Parsing línea ' + i + ': ' + line);
+                    const cols = parseCSVLine(line, delimiter);
+                    debug('-> columnas: ' + cols.length);
+                    cols.forEach((c, idx) => debug(`  [${i},${idx}]: "${c}"`));
+                    return cols;
+                });
+                debug('Matriz de filas construida con parser avanzado');
+
+                const worksheet = XLSX.utils.aoa_to_sheet(rows);
+                debug('Worksheet creado con aoa_to_sheet');
+
+                // Auto filtros
+                if (worksheet['!ref']) {
+                    worksheet['!autofilter'] = { ref: worksheet['!ref'] };
+                    debug('AutoFiltro aplicado ref=' + worksheet['!ref']);
+                }
+
+                // Anchos de columna
+                const allRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                debug('Filas procesadas para ancho: ' + allRows.length);
+                const colWidths = allRows[0].map((_, i) => ({ wch: Math.max(
+                    ...allRows.map(r => (r[i] ? r[i].toString().length : 0)), 10
+                ) + 2 }));
+                worksheet['!cols'] = colWidths;
+                debug('Ancho de columnas ajustado');
+
+                // Congelar primera fila
+                worksheet['!freeze'] = { ySplit: 1 };
+                debug('Primera fila congelada');
+
+                // Generar libro
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Hoja1');
+                debug('Workbook preparado con 1 hoja');
+
+                // Descargar
+                const outputName = file.name.replace(/\.csv$/i, '.xlsx');
+                debug('Intentando descargar: ' + outputName);
+                XLSX.writeFile(workbook, outputName);
+                debug('writeFile ejecutado');
+            } catch (err) {
+                debug('¡Error durante conversión! ' + err.message);
+                alert('Error: ' + err.message);
+            }
+        };
+        reader.onerror = function(err) {
+            debug('Error al leer el archivo: ' + err);
+            alert('Error al leer el archivo: ' + err);
+        };
+        debug('Llamando reader.readAsText');
+        reader.readAsText(file);
+    });
+    </script>
+</body>
+</html>
